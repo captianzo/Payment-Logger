@@ -10,14 +10,54 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 app.use(express.json());
 
+const sessions = {};
+
 app.post(`/webhook/${TELEGRAM_TOKEN}`, async (req, res) => {
 	res.sendStatus(200);
 
 	try {
 		const message = req.body.message
 
-		// Handles only if the incoming message request is a image. Ignores the request if text is received.
+		const chatId = message.chat.id;
+
+		if (!sessions[chatId]) {
+			sessions[chatId] = {
+				payeeName: null,
+				extractedData: null,
+				createdAt: Date.now()
+			};
+		}
+
+		// Handles only if the incoming message request is a TEXT
+		if (message && message.text) {
+			const currentSession = sessions[chatId];
+
+			const newPayeeName = message.text;
+			sessions[chatId].payeeName = newPayeeName;
+
+			if (currentSession.payeeName && currentSession.extractedData) {
+				await appendTransactionRow({
+					payeeName: currentSession.payeeName || "Unknown",
+					amount: currentSession.extractedData.amount,
+					date: currentSession.extractedData.date,
+					time: currentSession.extractedData.time,
+					upiTransactionId: currentSession.extractedData.upiTransactionId,
+					source: currentSession.extractedData.source
+				});
+
+				console.log('Extraction completed and appended to the Google Sheet, waiting for new image...\n');
+
+				delete sessions[chatId];
+			}
+			else {
+				console.log('Waiting for image...');
+			}
+		}
+
+		// Handles only if the incoming message request is a IMAGE
 		if (message && message.photo) {
+			const currentSession = sessions[chatId];
+
 			const fileId = req.body.message.photo[req.body.message.photo.length - 1].file_id;
 			console.log("Photo Received! File ID:", fileId);
 
@@ -27,17 +67,27 @@ app.post(`/webhook/${TELEGRAM_TOKEN}`, async (req, res) => {
 
 			const transactionData = await extractTransactionData(imageBuffer);
 
-			console.log('Extracted Data Recieved from Gemini: ', transactionData);
-			console.log('Extraction completed, waiting for new image...\n');
+			currentSession.extractedData = transactionData;
 
-			await appendTransactionRow({
-				payeeName: transactionData.receiver_name || "Unknown",
-				amount: transactionData.amount,
-				date: transactionData.date,
-				time: transactionData.time,
-				upiTransactionId: transactionData.upiTransactionId,
-				source: transactionData.source
-			});
+			console.log('Extracted Data Recieved from Gemini: ', transactionData);
+
+			if (currentSession.payeeName && currentSession.extractedData) {
+				await appendTransactionRow({
+					payeeName: currentSession.payeeName || "Unknown",
+					amount: currentSession.extractedData.amount,
+					date: currentSession.extractedData.date,
+					time: currentSession.extractedData.time,
+					upiTransactionId: currentSession.extractedData.upiTransactionId,
+					source: currentSession.extractedData.source
+				});
+				
+				console.log('Extraction completed and appended to the Google Sheet, waiting for new image...\n');
+
+				delete sessions[chatId];
+			}
+			else {
+				console.log('Waiting for text...');
+			}
 
 		}
 	} catch (error) {
