@@ -21,7 +21,6 @@ The bot uses `gemini-3.1-flash-lite-preview` to extract the following fields fro
 ## Project Structure
 
 ```
-src/
 Payment-Logger/
 ├── src/
 │   ├── extractor.js    # Gemini Vision prompt and response parsing[cite: 1]
